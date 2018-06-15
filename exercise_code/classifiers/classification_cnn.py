@@ -37,6 +37,14 @@ class ClassificationCNN(nn.Module):
         """
         super(ClassificationCNN, self).__init__()
         channels, height, width = input_dim
+        self.num_filters = num_filters
+        self.WidthAfterPool = int((width-pool)/stride_pool + 1)
+        self.flatLayers = int(num_filters*self.WidthAfterPool*self.WidthAfterPool)
+        self.flatfeatures = self.WidthAfterPool*self.WidthAfterPool*channels
+        padding = int((kernel_size-1)/2)
+
+        
+        
 
         ########################################################################
         # TODO: Initialize the necessary trainable layers to resemble the      #
@@ -54,16 +62,20 @@ class ClassificationCNN(nn.Module):
         # will not coincide with the Jupyter notebook cell.                    #
         ########################################################################
         #(C, H, W) = input_dim.shape
-        features = channels*height*width
-        self.conv1 = nn.Conv2d(channels, num_filters, kernel_size, stride_conv, 3, 1, 1)
+      
+
+        self.conv1 = nn.Conv2d(channels, num_filters, kernel_size, stride_conv, padding, 1, 1)
         self.conv1.weight.data = self.conv1.weight.data*weight_scale
 
         self.relu1 = nn.ReLU()
         self.maxpool = nn.MaxPool2d(pool, stride_pool, 0, 1, False, False)
-        self.fc1 = nn.Linear(128,1)
+        newSize = self.WidthAfterPool*self.WidthAfterPool*self.num_filters
+        
+        self.fc1 = nn.Linear(newSize, hidden_dim)
+
         self.dropout = nn.Dropout2d(dropout)
         self.relu2 = nn.ReLU()
-        self.fc2 = nn.Linear(1, 3)
+        self.fc2 = nn.Linear(hidden_dim, num_classes)
         #self._initialize_weights()
     
         ############################################################################
@@ -88,24 +100,34 @@ class ClassificationCNN(nn.Module):
         ########################################################################
         #print(x.shape)
         output = self.conv1(x)
-        #print(output.shape)
         output2 = self.relu1(output)
-        #print(output)
+
         output3 = self.maxpool(output2)
-        print(output3.shape)
-        output3 = output3.view(2, 128)
-        #print(output3)
+        flattenLength = output3.shape[1]*output3.shape[2]*output3.shape[3] #8192
+        
+        output3 = output3.view(output2.shape[0], flattenLength)
+        
         output4 = self.fc1(output3)
         output5 = self.dropout(output4)
         output6 = self.relu2(output5)
-        #comment
+        
         output7 = self.fc2(output6)
 
         ########################################################################
         #                             END OF YOUR CODE                         #
         ########################################################################
-
         return output7
+
+    def num_flat_features(self, x):
+        """
+        Computes the number of features if the spatial input x is transformed
+        to a 1D flat input.
+        """
+        size = x.size()[1:]  # all dimensions except the batch dimension
+        num_features = 1
+        for s in size:
+            num_features *= s
+        return num_features
 
 
     @property
