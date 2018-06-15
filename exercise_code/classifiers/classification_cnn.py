@@ -98,7 +98,7 @@ class ClassificationCNN(nn.Module):
         output4 = self.fc1(output3)
         output5 = self.dropout(output4)
         output6 = self.relu2(output5)
-        
+        #comment
         output7 = self.fc2(output6)
 
         ########################################################################
