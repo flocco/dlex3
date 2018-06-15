@@ -30,6 +30,26 @@ def conv_forward_naive(x, w, b, conv_param):
     # Hint: you can use the function np.pad for padding.                        #
     #############################################################################
 
+    stride = conv_param['stride']
+    pad = conv_param['pad']
+   
+    x_pad = np.zeros((x.shape[0], x.shape[1], x.shape[2]+pad*2, x.shape[3]+pad*2))
+
+    # pad 0 to image
+    for i in range(x.shape[0]):
+        for j in range(x.shape[1]):
+            x_pad[i, j, :, :] = np.pad(x[i, j, :, :], pad, 'constant', constant_values=0)
+
+    H_out = int((x.shape[2]+2*pad-w.shape[2])/stride+1)
+    W_out = int((x.shape[3]+2*pad-w.shape[3])/stride+1)
+    out = np.zeros((x.shape[0], w.shape[0], int(H_out), int(W_out)))
+
+    # convolution
+    for i in range(H_out):
+        for j in range(W_out):
+            for k in range(w.shape[0]):
+                out[:, k, i, j] = np.sum(w[k, :, :, :]*x_pad[:, :, i*stride:i*stride+w.shape[2], j*stride:j*stride+w.shape[3]], axis=(1, 2, 3))+b[k]
+
     #############################################################################
     #                             END OF YOUR CODE                              #
     #############################################################################
@@ -54,6 +74,31 @@ def conv_backward_naive(dout, cache):
     #############################################################################
     # TODO: Implement the convolutional backward pass.                          #
     #############################################################################
+    (x, w, b, conv_param) = cache
+    (N, C, H, W) = x.shape
+    (F, _, HH, WW) = w.shape
+    (_, _, H_prime, W_prime) = dout.shape
+    stride = conv_param['stride']
+    pad = conv_param['pad']
+
+    dx = np.zeros_like(x)
+    dw = np.zeros_like(w)
+    db = np.zeros_like(b)
+
+    for n in range(N):
+        dx_pad = np.pad(dx[n,:,:,:], ((0,0),(pad,pad),(pad,pad)), 'constant')
+        x_pad = np.pad(x[n,:,:,:], ((0,0),(pad,pad),(pad,pad)), 'constant')
+        for f in range(F):
+            for h_prime in range(H_prime):
+                for w_prime in range(W_prime):
+                    h1 = h_prime * stride
+                    h2 = h_prime * stride + HH
+                    w1 = w_prime * stride
+                    w2 = w_prime * stride + WW
+                    dx_pad[:, h1:h2, w1:w2] += w[f,:,:,:] * dout[n,f,h_prime,w_prime]
+                    dw[f,:,:,:] += x_pad[:, h1:h2, w1:w2] * dout[n,f,h_prime,w_prime]
+                    db[f] += dout[n,f,h_prime,w_prime]
+        dx[n,:,:,:] = dx_pad[:,1:-1,1:-1]
 
     #############################################################################
     #                             END OF YOUR CODE                              #
@@ -80,11 +125,28 @@ def max_pool_forward_naive(x, pool_param):
     #############################################################################
     # TODO: Implement the max pooling forward pass                              #
     #############################################################################
+    (N, C, H, W) = x.shape
+    pool_height = pool_param['pool_height']
+    pool_width = pool_param['pool_width']
+    stride = pool_param['stride']
+    H_prime = int(1 + (H - pool_height) / stride)
+    W_prime = int(1 + (W - pool_width) / stride)
 
+    out = np.zeros((N, C, H_prime, W_prime))
+
+    for n in range(N):
+        for h in range(H_prime):
+            for w in range(W_prime):
+                h1 = h * stride
+                h2 = h * stride + pool_height
+                w1 = w * stride
+                w2 = w * stride + pool_width
+                window = x[n, :, h1:h2, w1:w2]
+                out[n,:,h,w] = np.max(window.reshape((C, pool_height*pool_width)), axis=1)
     #############################################################################
     #                             END OF YOUR CODE                              #
     #############################################################################
-    cache = (x, maxIdx, pool_param)
+    cache = (x, pool_param)
     return out, cache
 
 
@@ -103,7 +165,30 @@ def max_pool_backward_naive(dout, cache):
     #############################################################################
     # TODO: Implement the max pooling backward pass                             #
     #############################################################################
+    (x, pool_param) = cache
+    (N, C, H, W) = x.shape
+    pool_height = pool_param['pool_height']
+    pool_width = pool_param['pool_width']
+    stride = pool_param['stride']
+    H_prime = int(1 + (H - pool_height) / stride)
+    W_prime = int(1 + (W - pool_width) / stride)
 
+    dx = np.zeros_like(x)
+
+    for n in range(N):
+        for c in range(C):
+            for h in range(H_prime):
+                for w in range(W_prime):
+                    h1 = h * stride
+                    h2 = h * stride + pool_height
+                    w1 = w * stride
+                    w2 = w * stride + pool_width
+                    window = x[n, c, h1:h2, w1:w2]
+                    window2 = np.reshape(window, (pool_height*pool_width))
+                    window3 = np.zeros_like(window2)
+                    window3[np.argmax(window2)] = 1
+
+                    dx[n,c,h1:h2,w1:w2] = np.reshape(window3,(pool_height,pool_width)) * dout[n,c,h,w]
     #############################################################################
     #                             END OF YOUR CODE                              #
     #############################################################################
@@ -111,186 +196,186 @@ def max_pool_backward_naive(dout, cache):
 
 
 def batchnorm_forward(x, gamma, beta, bn_param):
-  """
-  Forward pass for batch normalization.
+    """
+    Forward pass for batch normalization.
 
-  During training the sample mean and (uncorrected) sample variance are
-  computed from minibatch statistics and used to normalize the incoming data.
-  During training we also keep an exponentially decaying running mean of the mean
-  and variance of each feature, and these averages are used to normalize data
-  at test-time.
+    During training the sample mean and (uncorrected) sample variance are
+    computed from minibatch statistics and used to normalize the incoming data.
+    During training we also keep an exponentially decaying running mean of the mean
+    and variance of each feature, and these averages are used to normalize data
+    at test-time.
 
-  At each timestep we update the running averages for mean and variance using
-  an exponential decay based on the momentum parameter:
+    At each timestep we update the running averages for mean and variance using
+    an exponential decay based on the momentum parameter:
 
-  running_mean = momentum * running_mean + (1 - momentum) * sample_mean
-  running_var = momentum * running_var + (1 - momentum) * sample_var
+    running_mean = momentum * running_mean + (1 - momentum) * sample_mean
+    running_var = momentum * running_var + (1 - momentum) * sample_var
 
-  Note that the batch normalization paper suggests a different test-time
-  behavior: they compute sample mean and variance for each feature using a
-  large number of training images rather than using a running average. For
-  this implementation we have chosen to use running averages instead since
-  they do not require an additional estimation step; the torch7 implementation
-  of batch normalization also uses running averages.
+    Note that the batch normalization paper suggests a different test-time
+    behavior: they compute sample mean and variance for each feature using a
+    large number of training images rather than using a running average. For
+    this implementation we have chosen to use running averages instead since
+    they do not require an additional estimation step; the torch7 implementation
+    of batch normalization also uses running averages.
 
-  Input:
-  - x: Data of shape (N, D)
-  - gamma: Scale parameter of shape (D,)
-  - beta: Shift paremeter of shape (D,)
-  - bn_param: Dictionary with the following keys:
-    - mode: 'train' or 'test'; required
-    - eps: Constant for numeric stability
-    - momentum: Constant for running mean / variance.
-    - running_mean: Array of shape (D,) giving running mean of features
-    - running_var Array of shape (D,) giving running variance of features
+    Input:
+    - x: Data of shape (N, D)
+    - gamma: Scale parameter of shape (D,)
+    - beta: Shift paremeter of shape (D,)
+    - bn_param: Dictionary with the following keys:
+      - mode: 'train' or 'test'; required
+      - eps: Constant for numeric stability
+      - momentum: Constant for running mean / variance.
+      - running_mean: Array of shape (D,) giving running mean of features
+      - running_var Array of shape (D,) giving running variance of features
 
-  Returns a tuple of:
-  - out: of shape (N, D)
-  - cache: A tuple of values needed in the backward pass
-  """
-  mode = bn_param['mode']
-  eps = bn_param.get('eps', 1e-5)
-  momentum = bn_param.get('momentum', 0.9)
+    Returns a tuple of:
+    - out: of shape (N, D)
+    - cache: A tuple of values needed in the backward pass
+    """
+    mode = bn_param['mode']
+    eps = bn_param.get('eps', 1e-5)
+    momentum = bn_param.get('momentum', 0.9)
 
-  N, D = x.shape
-  running_mean = bn_param.get('running_mean', np.zeros(D, dtype=x.dtype))
-  running_var = bn_param.get('running_var', np.zeros(D, dtype=x.dtype))
+    N, D = x.shape
+    running_mean = bn_param.get('running_mean', np.zeros(D, dtype=x.dtype))
+    running_var = bn_param.get('running_var', np.zeros(D, dtype=x.dtype))
 
-  out, cache = None, None
-  if mode == 'train':
-    #############################################################################
-    # TODO: Implement the training-time forward pass for batch normalization.   #
-    # Use minibatch statistics to compute the mean and variance, use these      #
-    # statistics to normalize the incoming data, and scale and shift the        #
-    # normalized data using gamma and beta.                                     #
-    #                                                                           #
-    # You should store the output in the variable out. Any intermediates that   #
-    # you need for the backward pass should be stored in the cache variable.    #
-    #                                                                           #
-    # You should also use your computed sample mean and variance together with  #
-    # the momentum variable to update the running mean and running variance,    #
-    # storing your result in the running_mean and running_var variables.        #
-    #############################################################################
-    pass
-    #############################################################################
-    #                             END OF YOUR CODE                              #
-    #############################################################################
-  elif mode == 'test':
-    #############################################################################
-    # TODO: Implement the test-time forward pass for batch normalization. Use   #
-    # the running mean and variance to normalize the incoming data, then scale  #
-    # and shift the normalized data using gamma and beta. Store the result in   #
-    # the out variable.                                                         #
-    #############################################################################
-    pass
-    #############################################################################
-    #                             END OF YOUR CODE                              #
-    #############################################################################
-  else:
-    raise ValueError('Invalid forward batchnorm mode "%s"' % mode)
+    out, cache = None, None
+    if mode == 'train':
+        #############################################################################
+        # TODO: Implement the training-time forward pass for batch normalization.   #
+        # Use minibatch statistics to compute the mean and variance, use these      #
+        # statistics to normalize the incoming data, and scale and shift the        #
+        # normalized data using gamma and beta.                                     #
+        #                                                                           #
+        # You should store the output in the variable out. Any intermediates that   #
+        # you need for the backward pass should be stored in the cache variable.    #
+        #                                                                           #
+        # You should also use your computed sample mean and variance together with  #
+        # the momentum variable to update the running mean and running variance,    #
+        # storing your result in the running_mean and running_var variables.        #
+        #############################################################################
+        pass
+        #############################################################################
+        #                             END OF YOUR CODE                              #
+        #############################################################################
+    elif mode == 'test':
+        #############################################################################
+        # TODO: Implement the test-time forward pass for batch normalization. Use   #
+        # the running mean and variance to normalize the incoming data, then scale  #
+        # and shift the normalized data using gamma and beta. Store the result in   #
+        # the out variable.                                                         #
+        #############################################################################
+        pass
+        #############################################################################
+        #                             END OF YOUR CODE                              #
+        #############################################################################
+    else:
+        raise ValueError('Invalid forward batchnorm mode "%s"' % mode)
 
-  # Store the updated running means back into bn_param
-  bn_param['running_mean'] = running_mean
-  bn_param['running_var'] = running_var
+    # Store the updated running means back into bn_param
+    bn_param['running_mean'] = running_mean
+    bn_param['running_var'] = running_var
 
-  return out, cache
+    return out, cache
 
 
 def batchnorm_backward(dout, cache):
-  """
-  Backward pass for batch normalization.
+    """
+    Backward pass for batch normalization.
 
-  For this implementation, you should write out a computation graph for
-  batch normalization on paper and propagate gradients backward through
-  intermediate nodes.
+    For this implementation, you should write out a computation graph for
+    batch normalization on paper and propagate gradients backward through
+    intermediate nodes.
 
-  Inputs:
-  - dout: Upstream derivatives, of shape (N, D)
-  - cache: Variable of intermediates from batchnorm_forward.
+    Inputs:
+    - dout: Upstream derivatives, of shape (N, D)
+    - cache: Variable of intermediates from batchnorm_forward.
 
-  Returns a tuple of:
-  - dx: Gradient with respect to inputs x, of shape (N, D)
-  - dgamma: Gradient with respect to scale parameter gamma, of shape (D,)
-  - dbeta: Gradient with respect to shift parameter beta, of shape (D,)
-  """
-  dx, dgamma, dbeta = None, None, None
-  N, D = dout.shape
-  #############################################################################
-  # TODO: Implement the backward pass for batch normalization. Store the      #
-  # results in the dx, dgamma, and dbeta variables.                           #
-  #############################################################################
+    Returns a tuple of:
+    - dx: Gradient with respect to inputs x, of shape (N, D)
+    - dgamma: Gradient with respect to scale parameter gamma, of shape (D,)
+    - dbeta: Gradient with respect to shift parameter beta, of shape (D,)
+    """
+    dx, dgamma, dbeta = None, None, None
+    N, D = dout.shape
+    #############################################################################
+    # TODO: Implement the backward pass for batch normalization. Store the      #
+    # results in the dx, dgamma, and dbeta variables.                           #
+    #############################################################################
 
-  #############################################################################
-  #                             END OF YOUR CODE                              #
-  #############################################################################
+    #############################################################################
+    #                             END OF YOUR CODE                              #
+    #############################################################################
 
-  return dx, dgamma, dbeta
+    return dx, dgamma, dbeta
 
 
 def spatial_batchnorm_forward(x, gamma, beta, bn_param):
-  """
-  Computes the forward pass for spatial batch normalization.
+    """
+    Computes the forward pass for spatial batch normalization.
 
-  Inputs:
-  - x: Input data of shape (N, C, H, W)
-  - gamma: Scale parameter, of shape (C,)
-  - beta: Shift parameter, of shape (C,)
-  - bn_param: Dictionary with the following keys:
-    - mode: 'train' or 'test'; required
-    - eps: Constant for numeric stability
-    - momentum: Constant for running mean / variance. momentum=0 means that
-      old information is discarded completely at every time step, while
-      momentum=1 means that new information is never incorporated. The
-      default of momentum=0.9 should work well in most situations.
-    - running_mean: Array of shape (D,) giving running mean of features
-    - running_var Array of shape (D,) giving running variance of features
+    Inputs:
+    - x: Input data of shape (N, C, H, W)
+    - gamma: Scale parameter, of shape (C,)
+    - beta: Shift parameter, of shape (C,)
+    - bn_param: Dictionary with the following keys:
+      - mode: 'train' or 'test'; required
+      - eps: Constant for numeric stability
+      - momentum: Constant for running mean / variance. momentum=0 means that
+        old information is discarded completely at every time step, while
+        momentum=1 means that new information is never incorporated. The
+        default of momentum=0.9 should work well in most situations.
+      - running_mean: Array of shape (D,) giving running mean of features
+      - running_var Array of shape (D,) giving running variance of features
 
-  Returns a tuple of:
-  - out: Output data, of shape (N, C, H, W)
-  - cache: Values needed for the backward pass
-  """
-  out, cache = None, None
+    Returns a tuple of:
+    - out: Output data, of shape (N, C, H, W)
+    - cache: Values needed for the backward pass
+    """
+    out, cache = None, None
 
-  #############################################################################
-  # TODO: Implement the forward pass for spatial batch normalization.         #
-  #                                                                           #
-  # HINT: You can implement spatial batch normalization using the vanilla     #
-  # version of batch normalization defined above. Your implementation should  #
-  # be very short; ours is less than five lines.                              #
-  #############################################################################
+    #############################################################################
+    # TODO: Implement the forward pass for spatial batch normalization.         #
+    #                                                                           #
+    # HINT: You can implement spatial batch normalization using the vanilla     #
+    # version of batch normalization defined above. Your implementation should  #
+    # be very short; ours is less than five lines.                              #
+    #############################################################################
 
-  #############################################################################
-  #                             END OF YOUR CODE                              #
-  #############################################################################
+    #############################################################################
+    #                             END OF YOUR CODE                              #
+    #############################################################################
 
-  return out, cache
+    return out, cache
 
 
 def spatial_batchnorm_backward(dout, cache):
-  """
-  Computes the backward pass for spatial batch normalization.
+    """
+    Computes the backward pass for spatial batch normalization.
 
-  Inputs:
-  - dout: Upstream derivatives, of shape (N, C, H, W)
-  - cache: Values from the forward pass
+    Inputs:
+    - dout: Upstream derivatives, of shape (N, C, H, W)
+    - cache: Values from the forward pass
 
-  Returns a tuple of:
-  - dx: Gradient with respect to inputs, of shape (N, C, H, W)
-  - dgamma: Gradient with respect to scale parameter, of shape (C,)
-  - dbeta: Gradient with respect to shift parameter, of shape (C,)
-  """
-  dx, dgamma, dbeta = None, None, None
+    Returns a tuple of:
+    - dx: Gradient with respect to inputs, of shape (N, C, H, W)
+    - dgamma: Gradient with respect to scale parameter, of shape (C,)
+    - dbeta: Gradient with respect to shift parameter, of shape (C,)
+    """
+    dx, dgamma, dbeta = None, None, None
 
-  #############################################################################
-  # TODO: Implement the backward pass for spatial batch normalization.        #
-  #                                                                           #
-  # HINT: You can implement spatial batch normalization using the vanilla     #
-  # version of batch normalization defined above. Your implementation should  #
-  # be very short; ours is less than five lines.                              #
-  #############################################################################
+    #############################################################################
+    # TODO: Implement the backward pass for spatial batch normalization.        #
+    #                                                                           #
+    # HINT: You can implement spatial batch normalization using the vanilla     #
+    # version of batch normalization defined above. Your implementation should  #
+    # be very short; ours is less than five lines.                              #
+    #############################################################################
 
-  #############################################################################
-  #                             END OF YOUR CODE                              #
-  #############################################################################
+    #############################################################################
+    #                             END OF YOUR CODE                              #
+    #############################################################################
 
-  return dx, dgamma, dbeta
+    return dx, dgamma, dbeta

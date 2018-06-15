@@ -2,6 +2,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.init as init
 
 
 class ClassificationCNN(nn.Module):
@@ -52,8 +53,18 @@ class ClassificationCNN(nn.Module):
         # Note: Avoid using any of PyTorch's random functions or your output   #
         # will not coincide with the Jupyter notebook cell.                    #
         ########################################################################
+        #(C, H, W) = input_dim.shape
+        features = channels*height*width
+        self.conv1 = nn.Conv2d(channels, num_filters, kernel_size, stride_conv, 3, 1, 1)
+        self.conv1.weight.data = self.conv1.weight.data*weight_scale
 
-        pass
+        self.relu1 = nn.ReLU()
+        self.maxpool = nn.MaxPool2d(pool, stride_pool, 0, 1, False, False)
+        self.fc1 = nn.Linear(128,1)
+        self.dropout = nn.Dropout2d(dropout)
+        self.relu2 = nn.ReLU()
+        self.fc2 = nn.Linear(1, 3)
+        #self._initialize_weights()
     
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -75,14 +86,27 @@ class ClassificationCNN(nn.Module):
         # transition from the spatial input image to the flat fully connected  #
         # layers.                                                              #
         ########################################################################
+        #print(x.shape)
+        output = self.conv1(x)
+        #print(output.shape)
+        output2 = self.relu1(output)
+        #print(output)
+        output3 = self.maxpool(output2)
+        print(output3.shape)
+        output3 = output3.view(2, 128)
+        #print(output3)
+        output4 = self.fc1(output3)
+        output5 = self.dropout(output4)
+        output6 = self.relu2(output5)
+        
+        output7 = self.fc2(output6)
 
-        pass
-    
         ########################################################################
         #                             END OF YOUR CODE                         #
         ########################################################################
 
-        return x
+        return output7
+
 
     @property
     def is_cuda(self):
